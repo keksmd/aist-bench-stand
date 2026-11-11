@@ -25,7 +25,8 @@ def progress(out: Path) -> dict:
     traces = out / "traces"
     if not traces.is_dir():
         return {"complete": 0, "partial": 0}
-    return {"complete": sum(1 for _ in traces.glob("*.jsonl")), "partial": sum(1 for _ in traces.glob("*.part"))}
+    return {"complete": sum(1 for p in traces.glob("*.jsonl") if not p.name.startswith(".")),
+            "partial": sum(1 for p in traces.glob("*.part") if not p.name.startswith("."))}
 
 
 def _lines(path: Path):
@@ -36,7 +37,7 @@ def _lines(path: Path):
 
 def tasks(out: Path) -> list[dict]:
     rows = []
-    for f in sorted((out / "traces").glob("*.jsonl")):
+    for f in sorted(p for p in (out / "traces").glob("*.jsonl") if not p.name.startswith(".")):
         start = end = None
         for e in _lines(f):
             if e.get("type") == "run_start":
