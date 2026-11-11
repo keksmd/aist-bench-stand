@@ -13,6 +13,7 @@ ExecStart={{ bench_root }}/venv/bin/python -m stand work
 Restart=always
 RestartSec=10
 KillMode=mixed
+TimeoutStopSec=infinity
 
 [Install]
 WantedBy=multi-user.target
