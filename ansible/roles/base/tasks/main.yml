@@ -1,9 +1,11 @@
+- name: Package index
+  ansible.builtin.command: apt-get update -q
+  changed_when: false
+
 - name: Packages
   ansible.builtin.apt:
     name: [docker.io, docker-compose-v2, git, python3-yaml, ufw, unattended-upgrades, curl, jq]
     state: present
-    update_cache: true
-    cache_valid_time: 3600
 
 - name: Bench user
   ansible.builtin.user:
