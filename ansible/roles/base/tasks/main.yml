@@ -1,0 +1,55 @@
+- name: Packages
+  ansible.builtin.apt:
+    name: [docker.io, docker-compose-v2, git, python3-yaml, ufw, unattended-upgrades, curl, jq]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Bench user
+  ansible.builtin.user:
+    name: "{{ bench_user }}"
+    groups: docker
+    append: true
+    shell: /bin/bash
+
+- name: Bench directories
+  ansible.builtin.file:
+    path: "{{ bench_root }}/{{ item }}"
+    state: directory
+    owner: "{{ bench_user }}"
+    mode: "0755"
+  loop: [results, runner]
+
+- name: Docker running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Firewall allows SSH only
+  community.general.ufw:
+    rule: allow
+    name: OpenSSH
+
+- name: Firewall enabled, deny incoming
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+
+- name: SSH key-only login
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/10-bench.conf
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+    mode: "0644"
+  notify: Reload ssh
+
+- name: Results retention
+  ansible.builtin.cron:
+    name: prune bench results
+    user: "{{ bench_user }}"
+    special_time: daily
+    job: "find {{ bench_root }}/results -mindepth 1 -maxdepth 1 -type d -mtime +{{ results_retention_days }} -exec rm -rf {} +"

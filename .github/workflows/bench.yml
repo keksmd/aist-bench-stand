@@ -1,0 +1,57 @@
+name: bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      bench:
+        description: Benchmark name (file in benchmarks/ without .yaml)
+        required: true
+        default: t11-drift
+      params:
+        description: Space-separated key=value overrides, for example "provider=glm45 n_tasks=5"
+        required: false
+        default: ""
+      ref:
+        description: Target commit or branch instead of the declared ref (leave empty for the declared one)
+        required: false
+        default: ""
+
+jobs:
+  run:
+    runs-on: [self-hosted, aist-stand]
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run
+        id: run
+        env:
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          ZAI_API_KEY_2: ${{ secrets.ZAI_API_KEY_2 }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          BENCH: ${{ inputs.bench }}
+          PARAMS: ${{ inputs.params }}
+          REF: ${{ inputs.ref }}
+        run: |
+          args=()
+          for kv in $PARAMS; do args+=(--set "$kv"); done
+          [ -n "$REF" ] && args+=(--ref "$REF")
+          python3 harness/bench.py run "$BENCH" "${args[@]}" | tee result.json
+          dir=$(jq -r .dir result.json)
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "run_id=$(jq -r .run_id result.json)" >> "$GITHUB_OUTPUT"
+      - name: Summary
+        if: always() && steps.run.outputs.dir != ''
+        run: |
+          {
+            echo "### ${{ steps.run.outputs.run_id }}"
+            echo '```json'
+            jq '{bench, target, params, exit_code, wall_time_s, secret_scan_hits, files: (.files | length)}' "${{ steps.run.outputs.dir }}/manifest.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        if: always() && steps.run.outputs.dir != ''
+        with:
+          name: ${{ steps.run.outputs.run_id }}
+          path: ${{ steps.run.outputs.dir }}
+          retention-days: 30

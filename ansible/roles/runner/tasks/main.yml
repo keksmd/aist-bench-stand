@@ -1,0 +1,47 @@
+- name: Runner archive
+  ansible.builtin.unarchive:
+    src: "https://github.com/actions/runner/releases/download/v{{ runner_version }}/actions-runner-linux-x64-{{ runner_version }}.tar.gz"
+    dest: "{{ bench_root }}/runner"
+    remote_src: true
+    owner: "{{ bench_user }}"
+    creates: "{{ bench_root }}/runner/config.sh"
+
+- name: Runner dependencies
+  ansible.builtin.command: "{{ bench_root }}/runner/bin/installdependencies.sh"
+  args:
+    creates: /etc/.bench-runner-deps
+  register: deps
+
+- name: Mark runner dependencies installed
+  ansible.builtin.file:
+    path: /etc/.bench-runner-deps
+    state: touch
+    mode: "0644"
+  when: deps.changed
+
+- name: Register runner
+  become_user: "{{ bench_user }}"
+  ansible.builtin.command: >
+    ./config.sh --unattended --replace
+    --url https://github.com/{{ runner_repo }}
+    --token {{ runner_token }}
+    --name {{ inventory_hostname }}-{{ ansible_hostname }}
+    --labels {{ runner_labels }}
+    --work {{ bench_root }}/runner/_work
+  args:
+    chdir: "{{ bench_root }}/runner"
+    creates: "{{ bench_root }}/runner/.runner"
+  no_log: true
+
+- name: Runner service unit
+  ansible.builtin.template:
+    src: bench-runner.service.j2
+    dest: /etc/systemd/system/bench-runner.service
+    mode: "0644"
+
+- name: Runner service enabled
+  ansible.builtin.systemd:
+    name: bench-runner
+    state: started
+    enabled: true
+    daemon_reload: true

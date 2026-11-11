@@ -1,0 +1,23 @@
+name: t11-drift
+description: >
+  ST03 drift stand (Planner -> Executor -> Verifier on a mock travel API): 30 tasks x 5 API
+  versions x 2 awareness conditions. Default provider is the deterministic fake policy, so a
+  run costs nothing and checks the wiring; set provider=glm45 (or another entry in the overlay
+  config) for real model calls.
+repo: 7SUNNY77/T11
+ref: 66bea708a39fbe7caec789bdcf19b984c19ade2b
+image: python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535
+setup: pip install -q -r requirements.txt
+run: python run.py --config config/stand.toml --provider {provider} --experiment {experiment} --conditions {conditions} --n-tasks {n_tasks} --repeats {repeats}
+outputs: runs/{experiment}
+params:
+  provider: fake
+  experiment: fake-stand
+  conditions: all
+  n_tasks: 30
+  repeats: 1
+secrets: [ZAI_API_KEY, ZAI_API_KEY_2, GEMINI_API_KEY, GROQ_API_KEY]
+overlays:
+  - from: overlays/t11/config.toml
+    to: config/stand.toml
+timeout_min: 600

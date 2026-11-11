@@ -1,0 +1,8 @@
+- name: AIST benchmark stand
+  hosts: stand
+  become: true
+  vars_files:
+    - group_vars_all.yml
+  roles:
+    - base
+    - runner

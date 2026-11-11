@@ -1,0 +1,15 @@
+[Unit]
+Description=GitHub Actions runner for the AIST benchmark stand
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User={{ bench_user }}
+WorkingDirectory={{ bench_root }}/runner
+Environment=BENCH_RESULTS={{ bench_root }}/results
+ExecStart={{ bench_root }}/runner/run.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

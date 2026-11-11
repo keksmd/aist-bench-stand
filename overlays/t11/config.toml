@@ -1,0 +1,132 @@
+# Конфиг эксперимента. Ключи API — только в .env (см. .env.example).
+
+[experiment]
+name = "main"              # основной эксперимент; кэш — cache/<name>
+fake_name = "fake"        # fake-провайдер всегда пишет в runs/<fake_name>/
+seed = 42
+task_pool = 30            # размер пула задач; --n-tasks берёт префикс пула
+api_versions = ["v1", "v2_contract", "v2_contract_stale", "v2_units", "v2_benign"]
+awareness = ["A0", "A1"]  # какие условия из [awareness.*] входят в сетку
+executor_max_steps = 8
+workers = 3               # параллельные прогоны под общим RPM/TPM-лимитером
+order_seed = 7            # seed перемешивания порядка прогонов
+runs_dir = "runs"
+cache_dir = "cache"
+
+# Условия осведомлённости: каким агентам добавляется changelog текущей версии API
+# (для v1 — нерелевантный changelog). Новое условие = новая секция, без правки кода.
+[awareness.A0]
+changelog_to = []
+
+[awareness.A1]
+changelog_to = ["executor"]
+
+# Пример на будущее:
+# [awareness.A2]
+# changelog_to = ["executor", "verifier"]
+
+# kind = "fake" | "openai_compat".
+# Лимиты: rpm (запросов/мин), tpm (токенов/мин), tpd/rpd (в сутки); 0 — нет или неизвестен.
+
+[providers.fake]
+kind = "fake"
+model = "policy-fake"
+temperature = 0.0
+cache = false
+
+# Агенты МАС.
+[providers.gemini]
+kind = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+api_key_env = "GEMINI_API_KEY"
+model = "gemini-3.5-flash-lite"
+temperature = 0.7
+reasoning_effort = "low"      # minimal | low | medium | high; входит в run_id
+rpm = 10                  # лимиты заданы для 2.5-flash-lite; для 3.5 не проверены
+tpm = 250000
+rpd = 500                 # free tier: GenerateRequestsPerDayPerProjectPerModel = 500 (из ответа 429)
+
+# Судья (этап 2б).
+[providers.groq]
+kind = "openai_compat"
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+model = "openai/gpt-oss-120b"
+temperature = 0.0             # фиксирована; пишется в каждый вердикт
+reasoning_effort = "low"
+json_mode = true
+rpm = 30
+tpm = 8000
+tpd = 200000
+est_completion_tokens = 1500  # резерв под ответ с рассуждениями в TPM-лимитере
+timeout_s = 120
+
+[providers.ollama]
+kind = "openai_compat"
+base_url = "http://localhost:11434/v1"
+api_key_env = "OLLAMA_API_KEY"
+model = "qwen2.5:7b"
+temperature = 0.7
+timeout_s = 300
+
+[providers.glm]
+kind = "openai_compat"
+base_url = "https://api.z.ai/api/paas/v4/"
+api_key_env = "ZAI_API_KEY_2"
+model = "glm-4.7-flash"
+temperature = 0.7
+rpm = 10
+timeout_s = 180
+max_retries = 12
+backoff_base_s = 5.0
+backoff_max_s = 300.0
+
+[providers.glm_nocache]
+kind = "openai_compat"
+base_url = "https://api.z.ai/api/paas/v4/"
+api_key_env = "ZAI_API_KEY"
+model = "glm-4.7-flash"
+temperature = 0.7
+rpm = 10
+timeout_s = 180
+max_retries = 12
+backoff_base_s = 5.0
+backoff_max_s = 300.0
+cache = false
+
+[providers.glm45]
+kind = "openai_compat"
+base_url = "https://open.bigmodel.cn/api/paas/v4/"
+api_key_env = "ZAI_API_KEY"
+model = "glm-4.5-flash"
+temperature = 0.7
+rpm = 10
+timeout_s = 180
+max_retries = 12
+backoff_base_s = 5.0
+backoff_max_s = 300.0
+
+[providers.glm45_nocache]
+kind = "openai_compat"
+base_url = "https://open.bigmodel.cn/api/paas/v4/"
+api_key_env = "ZAI_API_KEY"
+model = "glm-4.5-flash"
+temperature = 0.7
+rpm = 10
+timeout_s = 180
+max_retries = 12
+backoff_base_s = 5.0
+backoff_max_s = 300.0
+cache = false
+
+[providers.glm45_t0]
+kind = "openai_compat"
+base_url = "https://open.bigmodel.cn/api/paas/v4/"
+api_key_env = "ZAI_API_KEY"
+model = "glm-4.5-flash"
+temperature = 0.0
+rpm = 10
+timeout_s = 180
+max_retries = 12
+backoff_base_s = 5.0
+backoff_max_s = 300.0

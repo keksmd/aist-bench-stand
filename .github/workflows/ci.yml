@@ -1,0 +1,16 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: pip install pyyaml ansible-core
+      - run: python3 harness/bench.py validate
+      - run: python3 -m unittest discover -s harness -p 'test_*.py' -v
+      - run: ansible-galaxy collection install community.general
+      - run: ansible-playbook -i inventory/stand.yml ansible/site.yml --syntax-check
