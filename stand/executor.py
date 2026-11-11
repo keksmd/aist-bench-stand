@@ -80,11 +80,87 @@ def stand_commit() -> str:
         return os.environ.get("STAND_COMMIT", "unknown")
 
 
+def catalogue_for(row) -> tuple[dict, Path | None, str | None]:
+    """The catalogue a run was submitted against: a configuration repository at a commit, or this one."""
+    keys = row.keys() if hasattr(row, "keys") else row
+    if "config_repo" in keys and row["config_repo"]:
+        return registry.load_config(row["config_repo"], row["config_ref"] or "main")
+    return registry.catalogue(), None, None
+
+
+def apply_components(mas, components: dict, src: Path, config_root: Path | None, work: Path) -> dict:
+    """Overlay each replaced component's paths on the base checkout; return what was used."""
+    used = {}
+    for name, source in components.items():
+        paths = mas.data["components"][name]["paths"]
+        if source["kind"] == "config":
+            if config_root is None:
+                raise registry.SpecError(f"component {name}: config: source needs a configuration repository")
+            origin = config_root / source["path"]
+            if len(paths) != 1:
+                raise registry.SpecError(f"component {name}: config: source replaces one path, declared {paths}")
+            pairs = [(origin, src / paths[0])]
+            info = {"source": f"config:{source['path']}"}
+        else:
+            other = work / f"component-{name}"
+            commit = checkout(source["repo"], source["ref"], other)
+            pairs = [(other / p, src / p) for p in paths]
+            info = {"source": f"{source['repo']}@{source['ref']}", "commit": commit}
+        for a, b in pairs:
+            if not a.exists():
+                raise registry.SpecError(f"component {name}: {a.name} missing in its source")
+            if b.is_dir():
+                shutil.rmtree(b)
+            if a.is_dir():
+                shutil.copytree(a, b)
+            else:
+                b.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(a, b)
+        info["files"] = {str(f.relative_to(src)): h for b in [q for _, q in pairs]
+                         for f, h in ([(b, hashlib.sha256(b.read_bytes()).hexdigest())] if b.is_file()
+                                      else [(x, hashlib.sha256(x.read_bytes()).hexdigest()) for x in sorted(b.rglob("*")) if x.is_file()])}
+        used[name] = info
+    return used
+
+
+def run_analyzers(bench, mas, plan, run_id: str, src: Path, config_root: Path | None, out_dir: Path) -> dict:
+    """Run the benchmark's analyzers on the finished run; each writes report.json in its directory."""
+    results = {}
+    for name, a in (bench.data.get("analyzers") or {}).items():
+        adir = out_dir / "analyzers" / name
+        adir.mkdir(parents=True)
+        cmd_text = " ".join(a["run"].split()).format(outputs=plan["outputs"], run_id=run_id, report="/report/report.json",
+                                                     mas="/mas", config="/config")
+        script = " && ".join(" ".join(c.split()) for c in (a.get("setup"), cmd_text) if c and c.strip())
+        mounts = ["-v", f"{src}:/mas", "-v", f"{adir}:/report", "-v", "bench-pip-cache:/root/.cache/pip"]
+        if config_root is not None:
+            mounts += ["-v", f"{config_root}:/config"]
+        image = a.get("image") or mas.data["image"]
+        started = time.time()
+        with open(adir / "log.txt", "w") as log:
+            try:
+                code = subprocess.run(["docker", "run", "--rm", "--name", f"bench-{run_id}-{name}", *mounts,
+                                       "-w", "/config" if config_root is not None else "/mas", image, "sh", "-c", script],
+                                      stdout=log, stderr=subprocess.STDOUT, timeout=3600).returncode
+            except subprocess.TimeoutExpired:
+                subprocess.run(["docker", "rm", "-f", f"bench-{run_id}-{name}"], capture_output=True)
+                code = 124
+        subprocess.run(["docker", "run", "--rm", "-v", f"{adir}:/report", image, "chown", "-R",
+                        f"{os.getuid()}:{os.getgid()}", "/report"], capture_output=True)
+        report = adir / "report.json"
+        results[name] = {"exit_code": code, "wall_time_s": round(time.time() - started, 1),
+                         "report": report.is_file(), "description": a.get("description", "")}
+    return results
+
+
 def execute(con, row, cat=None, poll_s: float = 5.0) -> int:
     run_id = row["id"]
-    cat = cat or registry.catalogue()
+    config_root = config_commit = None
+    if cat is None:
+        cat, config_root, config_commit = catalogue_for(row)
     mas, bench = cat["mas"][row["mas"]], cat["benchmarks"][row["bench"]]
     plan = registry.resolve(mas, bench, json.loads(row["overrides"]))
+    components = registry.check_components(mas, json.loads(row["components"] or "{}") if "components" in row.keys() else {})
     ad = adapter(bench.data["adapter"])
     db.update(con, run_id, total=ad.expected_runs(plan["params"]))
     available = {**os.environ, **read_env_file(os.environ.get("STAND_SECRETS_FILE"))}
@@ -100,11 +176,12 @@ def execute(con, row, cat=None, poll_s: float = 5.0) -> int:
         for o in mas.data.get("overlays") or []:
             dst = src / o["to"]
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(registry.ROOT / o["from"], dst)
+            shutil.copyfile(mas.root / o["from"], dst)
+        used_components = apply_components(mas, components, src, config_root, work)
         env_file = work / "env"
         env_file.touch(mode=0o600)
         env_file.write_text("".join(f"{k}={v}\n" for k, v in secrets.items()))
-        script = " && ".join(c for c in (mas.data.get("setup"), plan["command"]) if c)
+        script = " && ".join(" ".join(c.split()) for c in (mas.data.get("setup"), plan["command"]) if c and c.strip())
         cmd = ["docker", "run", "--rm", "--name", name, "--env-file", str(env_file),
                "-v", f"{src}:/work", "-v", "bench-pip-cache:/root/.cache/pip", "-w", "/work",
                mas.data["image"], "sh", "-c", script]
@@ -136,6 +213,11 @@ def execute(con, row, cat=None, poll_s: float = 5.0) -> int:
             rows = ad.tasks(out_dir / "outputs")
             db.put_tasks(con, run_id, rows)
             db.update(con, run_id, done=sum(1 for r in rows if r["success"] is not None))
+        status = con.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone()["status"]
+        analyzers = None
+        if code == 0 and status != "cancelled" and bench.data.get("analyzers"):
+            analyzers = run_analyzers(bench, mas, plan, run_id, src, config_root, out_dir)
+            db.update(con, run_id, analyzers=analyzers)
         hits = secret_hits(out_dir, list(secrets.values()))
         try:
             digest = _sh(["docker", "image", "inspect", "--format", "{{index .RepoDigests 0}}", mas.data["image"]])
@@ -143,16 +225,17 @@ def execute(con, row, cat=None, poll_s: float = 5.0) -> int:
             digest = None
         manifest = {
             "run_id": run_id, "stand_commit": stand_commit(),
+            "config": {"repo": row["config_repo"], "ref": row["config_ref"], "commit": config_commit} if config_commit else None,
             "mas": {"id": mas.id, "sha256": mas.sha256, "repo": mas.data["repo"], "commit": commit,
                     "declared_ref": mas.data["ref"]},
+            "components": used_components,
             "benchmark": {"id": bench.id, "sha256": bench.sha256},
             "image": digest, "command": plan["command"], "params": plan["params"],
             "secrets_used": sorted(secrets), "exit_code": code, "wall_time_s": round(time.time() - started, 1),
-            "secret_scan_hits": hits,
+            "analyzers": analyzers, "secret_scan_hits": hits,
             "files": file_hashes(out_dir / "outputs") if (out_dir / "outputs").exists() else {},
         }
         (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
-        status = con.execute("SELECT status FROM runs WHERE id=?", (run_id,)).fetchone()["status"]
         final = "cancelled" if status == "cancelled" else ("done" if code == 0 and not hits else "failed")
         db.update(con, run_id, status=final, exit_code=code, finished=time.time(), manifest=manifest,
                   error="secret scan matched; do not publish" if hits else None)

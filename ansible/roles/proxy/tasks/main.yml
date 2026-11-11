@@ -20,10 +20,11 @@
     home: /var/lib/caddy
     shell: /usr/sbin/nologin
 
-- name: UI password hash
+- name: Password hashes for the stand users
   ansible.builtin.command:
-    cmd: /usr/local/bin/caddy hash-password --plaintext "{{ lookup('file', stand_ui_password_file) }}"
-  register: ui_hash
+    cmd: /usr/local/bin/caddy hash-password --plaintext "{{ lookup('file', item.password_file) }}"
+  loop: "{{ stand_users }}"
+  register: user_hashes
   changed_when: false
   no_log: true
 

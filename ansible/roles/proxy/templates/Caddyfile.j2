@@ -5,7 +5,9 @@
 		}
 	}
 	basic_auth {
-		{{ stand_user }} {{ ui_hash.stdout }}
+{% for r in user_hashes.results %}
+		{{ r.item.name }} {{ r.stdout }}
+{% endfor %}
 	}
 	reverse_proxy 127.0.0.1:{{ stand_api_port }} {
 		header_up X-Stand-User {http.auth.user.id}

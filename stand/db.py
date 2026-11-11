@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 """
 STATUSES = ("queued", "running", "done", "failed", "cancelled")
+ADDED_COLUMNS = {"config_repo": "TEXT", "config_ref": "TEXT", "components": "TEXT", "analyzers": "TEXT"}
 
 
 def connect(path: str | Path | None = None) -> sqlite3.Connection:
@@ -35,14 +36,20 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
+    have = {r["name"] for r in con.execute("PRAGMA table_info(runs)")}
+    for col, typ in ADDED_COLUMNS.items():
+        if col not in have:
+            con.execute(f"ALTER TABLE runs ADD COLUMN {col} {typ}")
     return con
 
 
-def submit(con, mas: str, bench: str, overrides: dict, ref: str | None, note: str, by: str) -> str:
+def submit(con, mas: str, bench: str, overrides: dict, ref: str | None, note: str, by: str,
+           config_repo: str | None = None, config_ref: str | None = None, components: dict | None = None) -> str:
     run_id = f"{time.strftime('%Y%m%d-%H%M%S', time.gmtime())}-{bench}-{mas}-{secrets.token_hex(2)}"
-    con.execute("INSERT INTO runs (id, mas, bench, overrides, ref, note, submitted_by, status, created)"
-                " VALUES (?,?,?,?,?,?,?,?,?)",
-                (run_id, mas, bench, json.dumps(overrides), ref or None, note, by, "queued", time.time()))
+    con.execute("INSERT INTO runs (id, mas, bench, overrides, ref, note, submitted_by, status, created,"
+                " config_repo, config_ref, components) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (run_id, mas, bench, json.dumps(overrides), ref or None, note, by, "queued", time.time(),
+                 config_repo, config_ref, json.dumps(components or {})))
     return run_id
 
 
@@ -60,8 +67,9 @@ def claim(con) -> sqlite3.Row | None:
 
 
 def update(con, run_id: str, **fields) -> None:
-    if "manifest" in fields and not isinstance(fields["manifest"], str):
-        fields["manifest"] = json.dumps(fields["manifest"])
+    for k in ("manifest", "analyzers"):
+        if k in fields and fields[k] is not None and not isinstance(fields[k], str):
+            fields[k] = json.dumps(fields[k])
     cols = ", ".join(f"{k}=?" for k in fields)
     con.execute(f"UPDATE runs SET {cols} WHERE id=?", (*fields.values(), run_id))
 
@@ -83,4 +91,6 @@ def as_dict(row) -> dict:
     d = dict(row)
     d["overrides"] = json.loads(d["overrides"] or "{}")
     d["manifest"] = json.loads(d["manifest"]) if d.get("manifest") else None
+    d["components"] = json.loads(d["components"]) if d.get("components") else {}
+    d["analyzers"] = json.loads(d["analyzers"]) if d.get("analyzers") else None
     return d

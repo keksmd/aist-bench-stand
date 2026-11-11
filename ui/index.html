@@ -58,19 +58,22 @@ async function route() {
 window.addEventListener("hashchange", route);
 setInterval(() => $("#clock").textContent = new Date().toLocaleTimeString(), 1000);
 
+let configSrc = "";
 async function home() {
   catalog = catalog || await api("/api/catalog");
   const runs = await api("/api/runs?limit=200");
   const app = $("#app");
   if (!$("#launch")) {
     app.innerHTML = `<div class="card" id="launch"><h2>Запустить прогон</h2>
-      <div class="grid">
+      <div class="grid"><div style="grid-column:1/-1"><label>Конфигурация: owner/repo@ветка или коммит, где лежит stand/ (пусто = встроенная)</label><div style="display:flex;gap:8px"><input id="f-config" placeholder="barakhsin/mas-lifecycle@main" value="${esc(configSrc)}"><button class="ghost" id="f-load">Загрузить</button></div></div></div>
+      <div class="grid" style="margin-top:10px">
         <div><label>МАС</label><select id="f-mas">${catalog.mas.map(m => `<option>${esc(m.id)}</option>`).join("")}</select></div>
         <div><label>Бенчмарк</label><select id="f-bench">${catalog.benchmarks.map(b => `<option>${esc(b.id)}</option>`).join("")}</select></div>
         <div><label>Ref МАС (ветка или коммит, пусто = заявленный)</label><input id="f-ref" placeholder=""></div>
         <div><label>Заметка</label><input id="f-note" placeholder="зачем этот прогон"></div>
       </div>
       <div class="grid" id="f-params" style="margin-top:10px"></div>
+      <div class="grid" id="f-comps" style="margin-top:10px"></div>
       <div style="margin-top:10px;display:flex;gap:10px;align-items:center"><button id="f-go">В очередь</button><span id="f-msg" class="muted"></span></div>
       <div id="f-desc" class="muted" style="margin-top:8px;font-size:12px"></div></div>
       <div class="card"><h2>Прогоны</h2><div id="runs"></div></div>`;
@@ -80,14 +83,23 @@ async function home() {
       $("#f-params").innerHTML = Object.entries(params).map(([k, v]) => `<div><label>${esc(k)}</label>${choices[k]
         ? `<select data-k="${esc(k)}">${choices[k].map(c => `<option ${String(c) === String(v) ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`
         : `<input data-k="${esc(k)}" value="${esc(v)}">`}</div>`).join("");
+      const comps = Object.keys(m.components || {});
+      $("#f-comps").innerHTML = comps.length ? comps.map(c => `<div><label>компонент ${esc(c)}: источник (пусто = базовый)</label><input data-c="${esc(c)}" placeholder="ref | owner/repo@ref | config:path"></div>`).join("") : "";
       $("#f-desc").innerHTML = `<div class="graph">${(m.agents || []).map(a => `<span class="n">${esc(a)}</span>`).join(" → ")}<span class="muted">· tools: ${esc((m.tools || []).join(", "))} · ${esc(m.repo)}@${esc(m.ref.slice(0, 8))}</span></div><div style="margin-top:4px">${esc(b.description || "")}</div>`;
     };
     $("#f-mas").onchange = draw; $("#f-bench").onchange = draw; draw();
+    $("#f-load").onclick = async () => {
+      configSrc = $("#f-config").value.trim();
+      $("#f-msg").textContent = "загружаю конфигурацию…";
+      try { catalog = await api(`/api/catalog${configSrc ? "?config=" + encodeURIComponent(configSrc) : ""}`); $("#launch").remove(); home(); }
+      catch (e) { $("#f-msg").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+    };
     $("#f-go").onclick = async () => {
       const overrides = {}; $("#f-params").querySelectorAll("[data-k]").forEach(el => overrides[el.dataset.k] = el.value);
+      const components = {}; $("#f-comps").querySelectorAll("[data-c]").forEach(el => { if (el.value.trim()) components[el.dataset.c] = el.value.trim(); });
       $("#f-msg").textContent = "…";
       try {
-        const r = await api("/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mas: $("#f-mas").value, bench: $("#f-bench").value, overrides, ref: $("#f-ref").value || null, note: $("#f-note").value }) });
+        const r = await api("/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mas: $("#f-mas").value, bench: $("#f-bench").value, overrides, components, config: configSrc || null, ref: $("#f-ref").value || null, note: $("#f-note").value }) });
         location.hash = `#/run/${encodeURIComponent(r.id)}`;
       } catch (e) { $("#f-msg").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     };
@@ -96,7 +108,7 @@ async function home() {
     const pct = r.total ? Math.min(100, 100 * r.done / r.total) : 0;
     return `<tr class="click" onclick="location.hash='#/run/${encodeURIComponent(r.id)}'"><td class="mono">${esc(r.id)}<div class="muted">${esc(r.note || "")}</div></td><td>${pill(r.status)}</td>
       <td><div class="bar"><i style="width:${pct}%"></i></div><span class="muted mono">${r.done || 0}/${r.total ?? "?"}</span></td>
-      <td class="mono">${r.outcomes.pass} / ${r.outcomes.fail}</td><td class="mono">${esc(Object.entries(r.overrides).map(([k, v]) => `${k}=${v}`).join(" ") || "по умолчанию")}${r.ref ? `<div>ref ${esc(r.ref)}</div>` : ""}</td>
+      <td class="mono">${r.outcomes.pass} / ${r.outcomes.fail}</td><td class="mono">${esc(Object.entries(r.overrides).map(([k, v]) => `${k}=${v}`).join(" ") || "по умолчанию")}${r.ref ? `<div>ref ${esc(r.ref)}</div>` : ""}${Object.keys(r.components || {}).length ? `<div>компоненты: ${esc(Object.entries(r.components).map(([k, v]) => `${k}=${v}`).join(" "))}</div>` : ""}${r.config_repo ? `<div class="muted">${esc(r.config_repo)}@${esc((r.config_ref || "").slice(0, 10))}</div>` : ""}</td>
       <td>${esc(r.submitted_by || "")}</td><td class="muted">${ago(r.created)}</td></tr>`;
   }).join("")}</table>` : `<div class="muted">Прогонов ещё нет.</div>`;
   if (runs.some(r => r.status === "running" || r.status === "queued")) timer = setTimeout(home, 5000);
@@ -121,6 +133,8 @@ async function runView(id) {
       <div><label>Запустил</label>${esc(r.submitted_by || "")} <span class="muted">${ago(r.created)}</span></div>
     </div>
     ${r.note ? `<div style="margin-top:8px">${esc(r.note)}</div>` : ""}
+    ${r.config_repo ? `<div class="mono" style="margin-top:6px">конфигурация ${esc(r.config_repo)}@${esc(m?.config?.commit?.slice(0, 10) || r.config_ref || "")}</div>` : ""}
+    ${Object.keys(m?.components || r.components || {}).length ? `<div style="margin-top:6px"><label>Подменённые компоненты</label>${Object.entries(m?.components || r.components).map(([k, v]) => `<div class="mono">${esc(k)} ← ${esc(typeof v === "string" ? v : v.source + (v.commit ? " (" + v.commit.slice(0, 10) + ")" : ""))}</div>`).join("")}</div>` : ""}
     ${r.error ? `<div class="err" style="margin-top:8px">${esc(r.error)}</div>` : ""}
     ${m ? `<div class="muted mono" style="margin-top:8px">${esc(m.mas.repo)}@${esc(m.mas.commit.slice(0, 10))} · ${m.imported ? `импортирован из ${esc(m.source)}` : `${esc(m.image || "")} · exit ${m.exit_code} · ${m.wall_time_s} с`} · secret scan ${m.secret_scan_hits} · <a href="/api/runs/${encodeURIComponent(r.id)}/manifest" target="_blank">manifest.json</a></div>` : ""}
   </div>
@@ -132,7 +146,11 @@ async function runView(id) {
       return `<td class="c ${f ? "f" : p ? "p" : "r"}" data-trace="${esc(xs[0].trace)}" title="${esc(xs.map(x => x.reason || (x.success ? "pass" : "")).join(", "))}">${xs.length > 1 ? `${p}/${xs.length}` : f ? "✗" : p ? "✓" : "…"}</td>`; }).join("")}</tr>`).join("")}</table></div>
     <div class="muted" style="font-size:12px;margin-top:6px">Клик по клетке открывает трассу.</div></div>
     <div class="card"><h2>Трасса <span class="mono muted" id="tr-name"></span></h2><div id="trace" class="muted">Выбери клетку слева.</div></div></div>
+  ${r.analyzers ? `<div class="card"><h2>Анализаторы</h2>${Object.entries(r.analyzers).map(([n, a]) => `<div style="margin-bottom:8px"><b class="mono">${esc(n)}</b> ${a.exit_code === 0 ? pill("done") : pill("failed")} <span class="muted">${a.wall_time_s} с · ${esc(a.description || "")}</span> <button class="ghost" data-an="${esc(n)}">Показать</button><pre class="log" id="an-${esc(n)}" style="display:none"></pre></div>`).join("")}</div>` : ""}
   <div class="card"><h2>Лог контейнера (хвост)</h2><pre class="log" id="log"></pre></div>`;
+  $("#app").querySelectorAll("button[data-an]").forEach(b => b.onclick = async () => {
+    const el = $(`#an-${CSS.escape(b.dataset.an)}`); const d = await api(`/api/runs/${encodeURIComponent(id)}/analyzers/${encodeURIComponent(b.dataset.an)}`);
+    el.textContent = d.report ? JSON.stringify(d.report, null, 1).slice(0, 200000) : d.log || "(нет отчёта)"; el.style.display = "block"; });
   $("#app").querySelectorAll("td[data-trace]").forEach(td => td.onclick = () => showTrace(id, td.dataset.trace));
   if ($("#cancel")) $("#cancel").onclick = async () => { await api(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }); route(); };
   api(`/api/runs/${encodeURIComponent(id)}/log?tail=200`).then(t => { const el = $("#log"); el.textContent = t || "(пусто)"; el.scrollTop = el.scrollHeight; }).catch(() => {});

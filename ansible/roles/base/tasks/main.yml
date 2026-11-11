@@ -20,7 +20,7 @@
     state: directory
     owner: "{{ bench_user }}"
     mode: "0755"
-  loop: [results, runner]
+  loop: [results, runner, configs]
 
 - name: Docker running
   ansible.builtin.service:

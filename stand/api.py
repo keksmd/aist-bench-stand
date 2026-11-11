@@ -19,7 +19,8 @@ from . import db, executor, registry
 
 app = FastAPI(title="AIST benchmark stand")
 UI = registry.ROOT / "ui" / "index.html"
-LIST_COLS = "id, mas, bench, overrides, ref, note, submitted_by, status, created, started, finished, exit_code, done, total, error"
+LIST_COLS = ("id, mas, bench, overrides, ref, note, submitted_by, status, created, started, finished, exit_code,"
+             " done, total, error, config_repo, config_ref, components")
 
 
 def con():
@@ -32,6 +33,19 @@ class RunRequest(BaseModel):
     overrides: dict[str, str | int] = Field(default_factory=dict)
     ref: str | None = None
     note: str = ""
+    config: str | None = Field(default=None, description="owner/repo@ref whose stand/ directory declares the MAS and benchmarks")
+    components: dict[str, str] = Field(default_factory=dict)
+
+
+def _catalogue(config: str | None):
+    if not config:
+        return registry.catalogue(), None, None
+    repo, _, ref = config.partition("@")
+    try:
+        cat, _, sha = registry.load_config(repo, ref or "main")
+    except (registry.SpecError, Exception) as e:
+        raise HTTPException(400, f"configuration {config}: {e}")
+    return cat, repo, ref or "main"
 
 
 @app.get("/", include_in_schema=False)
@@ -40,12 +54,12 @@ def index():
 
 
 @app.get("/api/catalog")
-def catalog():
-    cat = registry.catalogue()
+def catalog(config: str | None = None):
+    cat = _catalogue(config)[0]
     pick = lambda s, keys: {k: s.data.get(k) for k in keys} | {"sha256": s.sha256}
-    return {"mas": [pick(s, ("id", "family", "description", "repo", "ref", "agents", "edges", "tools", "params", "choices"))
+    return {"mas": [pick(s, ("id", "family", "description", "repo", "ref", "agents", "edges", "tools", "params", "choices", "components"))
                     for s in cat["mas"].values()],
-            "benchmarks": [pick(s, ("id", "family", "description", "params", "choices", "adapter"))
+            "benchmarks": [pick(s, ("id", "family", "description", "params", "choices", "adapter", "analyzers"))
                            for s in cat["benchmarks"].values()]}
 
 
@@ -70,6 +84,7 @@ def runs(limit: int = 100, status: str | None = None):
     counts = _pass_counts(c, [r["id"] for r in rows])
     for r in rows:
         r["overrides"] = json.loads(r["overrides"] or "{}")
+        r["components"] = json.loads(r["components"] or "{}")
         r["outcomes"] = counts.get(r["id"], {"pass": 0, "fail": 0})
     return rows
 
@@ -131,6 +146,16 @@ def log(run_id: str, tail: int = 300):
     return "\n".join(p.read_text(errors="replace").splitlines()[-min(tail, 5000):])
 
 
+@app.get("/api/runs/{run_id}/analyzers/{name}")
+def analyzer(run_id: str, name: str):
+    if not name.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(400, "bad analyzer name")
+    d = _run_dir(run_id) / "analyzers" / name
+    report, log = d / "report.json", d / "log.txt"
+    return {"report": json.loads(report.read_text()) if report.is_file() else None,
+            "log": "\n".join(log.read_text(errors="replace").splitlines()[-200:]) if log.is_file() else ""}
+
+
 @app.get("/api/runs/{run_id}/manifest")
 def manifest(run_id: str):
     p = _run_dir(run_id) / "manifest.json"
@@ -141,15 +166,20 @@ def manifest(run_id: str):
 
 @app.post("/api/runs", status_code=201)
 def submit(req: RunRequest, request: Request):
-    cat = registry.catalogue()
+    cat, config_repo, config_ref = _catalogue(req.config)
     if req.mas not in cat["mas"] or req.bench not in cat["benchmarks"]:
         raise HTTPException(400, "unknown MAS or benchmark")
     try:
         registry.resolve(cat["mas"][req.mas], cat["benchmarks"][req.bench], dict(req.overrides))
+        registry.check_components(cat["mas"][req.mas], dict(req.components))
     except registry.SpecError as e:
         raise HTTPException(400, str(e))
     user = request.headers.get("x-stand-user") or "anonymous"
-    run_id = db.submit(con(), req.mas, req.bench, dict(req.overrides), req.ref, req.note[:500], user)
+    actor = request.headers.get("x-stand-actor")
+    if user == "ci" and actor:
+        user = f"{actor[:60]} via ci"
+    run_id = db.submit(con(), req.mas, req.bench, dict(req.overrides), req.ref, req.note[:500], user,
+                       config_repo, config_ref, dict(req.components))
     return {"id": run_id}
 
 

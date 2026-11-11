@@ -10,7 +10,7 @@ import logging
 import signal
 import time
 
-from . import db, executor, registry
+from . import db, executor
 
 log = logging.getLogger("stand.worker")
 stopping = False
@@ -38,7 +38,7 @@ def loop(idle_s: float = 5.0) -> None:
             continue
         log.info("run %s: %s on %s", row["id"], row["bench"], row["mas"])
         try:
-            code = executor.execute(con, row, registry.catalogue())
+            code = executor.execute(con, row)
             log.info("run %s finished with %s", row["id"], code)
         except Exception:
             log.exception("run %s failed", row["id"])

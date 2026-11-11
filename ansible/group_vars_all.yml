@@ -7,8 +7,9 @@ runner_repo: keksmd/aist-bench-stand
 stand_repo_url: https://github.com/keksmd/aist-bench-stand.git
 stand_version: main
 stand_api_port: 8765
-stand_user: aist
-stand_ui_password_file: ~/.config/aist-stand/ui-password
+stand_users:
+  - {name: aist, password_file: ~/.config/aist-stand/ui-password}
+  - {name: ci, password_file: ~/.config/aist-stand/ci-token}
 stand_secrets_file: ~/IdeaProjects/T11/.env
 caddy_version: "2.11.9"
 caddy_sha512: 0e85544340290a16ce4bfb76fe7d65e9de1bf3a6e67f5ccfff30b30d27ea4c73e078077b7bf3e58ae60b6b12e44327705287059c775bca5782e8ee85ea7edd75

@@ -51,6 +51,38 @@ class RegistryTest(unittest.TestCase):
             registry.resolve(other, self.bench, {})
 
 
+class ComponentTest(unittest.TestCase):
+    def test_sources(self):
+        self.assertEqual(registry.parse_source("config:stand/components/x.py", "o/r"), {"kind": "config", "path": "stand/components/x.py"})
+        self.assertEqual(registry.parse_source("abc123", "o/r"), {"kind": "git", "repo": "o/r", "ref": "abc123"})
+        self.assertEqual(registry.parse_source("me/fork@feature/x", "o/r"), {"kind": "git", "repo": "me/fork", "ref": "feature/x"})
+        for bad in ("config:../etc/passwd", "config:/etc/passwd", "o/r@ref;rm", "a b"):
+            with self.assertRaises(registry.SpecError):
+                registry.parse_source(bad, "o/r")
+
+    def test_unknown_component_rejected(self):
+        mas = registry.Spec("mas", {"repo": "o/r", "components": {"executor": {"paths": ["a.py"]}}}, "x")
+        self.assertEqual(registry.check_components(mas, {"executor": "main"})["executor"]["ref"], "main")
+        with self.assertRaises(registry.SpecError):
+            registry.check_components(mas, {"planner": "main"})
+
+    def test_apply_components_from_config_and_git(self):
+        from stand import executor
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "src" / "pkg").mkdir(parents=True)
+            (d / "src" / "pkg" / "a.py").write_text("old")
+            (d / "cfg" / "alt").mkdir(parents=True)
+            (d / "cfg" / "alt" / "a.py").write_text("new")
+            mas = registry.Spec("mas", {"repo": "o/r", "components": {"a": {"paths": ["pkg/a.py"]}}}, "x")
+            used = executor.apply_components(mas, {"a": {"kind": "config", "path": "alt/a.py"}}, d / "src", d / "cfg", d)
+            self.assertEqual((d / "src" / "pkg" / "a.py").read_text(), "new")
+            self.assertEqual(used["a"]["source"], "config:alt/a.py")
+            self.assertIn("pkg/a.py", used["a"]["files"])
+            with self.assertRaises(registry.SpecError):
+                executor.apply_components(mas, {"a": {"kind": "config", "path": "alt/missing.py"}}, d / "src", d / "cfg", d)
+
+
 class AdapterTest(unittest.TestCase):
     def test_tasks_events_progress(self):
         with tempfile.TemporaryDirectory() as d:
