@@ -16,5 +16,5 @@ tools: [search_hotels, search_flights]
 params:
   provider: fake
 choices:
-  provider: [fake, glm45, glm45_t0, glm45_nocache, glm, glm_nocache]
+  provider: [fake, glm45, glm45_t0, glm45_nocache, glm, glm_nocache, gemini]
 secrets: [ZAI_API_KEY, ZAI_API_KEY_2]
