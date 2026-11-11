@@ -7,6 +7,10 @@ Wants=network-online.target
 User={{ bench_user }}
 WorkingDirectory={{ bench_root }}/runner
 Environment=BENCH_RESULTS={{ bench_root }}/results
+Environment=STAND_DB={{ bench_root }}/stand.db
+Environment=STAND_APP={{ bench_root }}/app
+Environment=STAND_PY={{ bench_root }}/venv/bin/python
+Environment=STAND_SECRETS_FILE={{ bench_root }}/secrets.env
 ExecStart={{ bench_root }}/runner/run.sh
 Restart=always
 RestartSec=10

@@ -1,0 +1,16 @@
+id: drift
+family: t11
+description: >
+  Tool-API drift benchmark from the ST03 stand: 30 travel tasks under 5 API versions (v1,
+  v2_contract, v2_contract_stale, v2_units, v2_benign) and 2 awareness conditions (A0 without a
+  changelog, A1 with one). A task passes when the final answer matches the gold pair or total.
+run: >
+  python run.py --config config/stand.toml --provider {provider} --experiment {provider}-stand
+  --conditions {conditions} --n-tasks {n_tasks} --repeats {repeats}
+outputs: runs/{provider}-stand/{provider}
+adapter: t11
+params:
+  conditions: all
+  n_tasks: 30
+  repeats: 1
+timeout_min: 720

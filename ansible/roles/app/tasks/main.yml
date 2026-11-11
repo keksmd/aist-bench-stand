@@ -1,0 +1,46 @@
+- name: Python venv support
+  ansible.builtin.apt:
+    name: [python3-venv]
+    state: present
+
+- name: Stand code
+  become_user: "{{ bench_user }}"
+  ansible.builtin.git:
+    repo: "{{ stand_repo_url }}"
+    dest: "{{ bench_root }}/app"
+    version: "{{ stand_version }}"
+    force: true
+  notify: Restart stand
+
+- name: Stand dependencies
+  become_user: "{{ bench_user }}"
+  ansible.builtin.pip:
+    requirements: "{{ bench_root }}/app/requirements.txt"
+    virtualenv: "{{ bench_root }}/venv"
+    virtualenv_command: python3 -m venv
+  notify: Restart stand
+
+- name: API keys for the worker
+  ansible.builtin.copy:
+    src: "{{ stand_secrets_file }}"
+    dest: "{{ bench_root }}/secrets.env"
+    owner: "{{ bench_user }}"
+    mode: "0600"
+    force: false
+  no_log: true
+
+- name: Stand services
+  ansible.builtin.template:
+    src: "{{ item }}.service.j2"
+    dest: "/etc/systemd/system/{{ item }}.service"
+    mode: "0644"
+  loop: [stand-api, stand-worker]
+  notify: Restart stand
+
+- name: Stand services enabled
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  loop: [stand-api, stand-worker]

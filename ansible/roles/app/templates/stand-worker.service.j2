@@ -1,0 +1,18 @@
+[Unit]
+Description=AIST stand run queue worker
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+User={{ bench_user }}
+WorkingDirectory={{ bench_root }}/app
+Environment=STAND_DB={{ bench_root }}/stand.db
+Environment=BENCH_RESULTS={{ bench_root }}/results
+Environment=STAND_SECRETS_FILE={{ bench_root }}/secrets.env
+ExecStart={{ bench_root }}/venv/bin/python -m stand work
+Restart=always
+RestartSec=10
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

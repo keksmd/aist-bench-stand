@@ -1,0 +1,20 @@
+id: t11
+family: t11
+description: >
+  ST03 drift-stand MAS: Planner -> Executor -> Verifier with two tools on a mock travel API.
+  The model behind every agent is the provider entry from the overlay config.
+repo: 7SUNNY77/T11
+ref: 66bea708a39fbe7caec789bdcf19b984c19ade2b
+image: python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535
+setup: pip install -q -r requirements.txt
+overlays:
+  - from: overlays/t11/config.toml
+    to: config/stand.toml
+agents: [planner, executor, verifier]
+edges: [[planner, executor], [executor, verifier]]
+tools: [search_hotels, search_flights]
+params:
+  provider: fake
+choices:
+  provider: [fake, glm45, glm45_t0, glm45_nocache, glm, glm_nocache]
+secrets: [ZAI_API_KEY, ZAI_API_KEY_2]

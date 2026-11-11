@@ -38,6 +38,7 @@
     src: bench-runner.service.j2
     dest: /etc/systemd/system/bench-runner.service
     mode: "0644"
+  notify: Restart runner
 
 - name: Runner service enabled
   ansible.builtin.systemd:

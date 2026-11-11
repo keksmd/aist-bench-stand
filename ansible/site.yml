@@ -6,3 +6,5 @@
   roles:
     - base
     - runner
+    - app
+    - proxy

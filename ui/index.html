@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIST Bench Stand</title>
+<style>
+:root{--bg:#fafafa;--card:#fff;--ink:#16161a;--muted:#6b6b76;--line:#e4e4ea;--acc:#761cd8;--acc2:#d65ce0;--ok:#1f9d55;--bad:#d64545;--warn:#c98a0b;--tint:#f3ecfd;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#121216;--card:#1b1b21;--ink:#ececf1;--muted:#9a9aa6;--line:#2c2c35;--tint:#2a2140}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;gap:16px;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:2}
+header h1{font-size:16px;margin:0}header a{color:var(--ink);text-decoration:none}header .sp{flex:1}
+main{max-width:1280px;margin:0 auto;padding:16px 20px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.card h2{font-size:14px;margin:0 0 10px}
+table{border-collapse:collapse;width:100%}th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:12px}tr.click{cursor:pointer}tr.click:hover{background:var(--tint)}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:600}
+.queued{background:#8883;color:var(--muted)}.running{background:#761cd833;color:var(--acc)}.done{background:#1f9d5533;color:var(--ok)}.failed{background:#d6454533;color:var(--bad)}.cancelled{background:#c98a0b33;color:var(--warn)}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;min-width:90px}.bar i{display:block;height:100%;background:var(--acc)}
+.mono{font-family:var(--mono);font-size:12px}.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+input,select,textarea{width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+button{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:7px 14px;font:inherit;font-weight:600;cursor:pointer}button.ghost{background:transparent;color:var(--acc);border:1px solid var(--acc)}
+.matrix td.c{text-align:center;padding:3px;font-size:11px;min-width:26px}.c.p{background:#1f9d5540}.c.f{background:#d6454550}.c.r{background:#8882}
+.matrix td.c{cursor:pointer}.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:14px}
+@media (max-width:900px){.cols{grid-template-columns:1fr}}
+.ev{border-left:3px solid var(--line);padding:6px 10px;margin:6px 0;background:var(--bg);border-radius:0 6px 6px 0}
+.ev.planner{border-color:#3b82f6}.ev.executor{border-color:var(--acc)}.ev.verifier{border-color:var(--acc2)}.ev.check{border-color:var(--ok)}.ev.user{border-color:var(--muted)}
+.ev pre{white-space:pre-wrap;word-break:break-word;margin:4px 0 0;font-family:var(--mono);font-size:12px;max-height:260px;overflow:auto}
+details{margin-top:4px}summary{cursor:pointer;color:var(--acc);font-size:12px}
+pre.log{background:var(--bg);padding:10px;border-radius:6px;max-height:360px;overflow:auto;font-size:11.5px;white-space:pre-wrap}
+.err{color:var(--bad)}a{color:var(--acc)}
+.graph{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px}.graph span.n{background:var(--tint);padding:2px 8px;border-radius:6px;font-weight:600}
+</style>
+</head>
+<body>
+<header><h1><a href="#/">AIST Bench Stand</a></h1><span class="sp"></span><span class="muted mono" id="clock"></span></header>
+<main id="app"></main>
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = async (p, opt) => { const r = await fetch(p, opt); if (!r.ok) throw new Error((await r.text()) || r.status); return r.headers.get("content-type")?.includes("json") ? r.json() : r.text(); };
+const ago = t => { if (!t) return ""; const s = Date.now() / 1000 - t; return s < 90 ? `${s | 0} с назад` : s < 5400 ? `${(s / 60) | 0} мин назад` : s < 172800 ? `${(s / 3600).toFixed(1)} ч назад` : new Date(t * 1000).toLocaleString(); };
+const dur = (a, b) => { if (!a) return ""; const s = (b || Date.now() / 1000) - a; return s < 3600 ? `${(s / 60).toFixed(1)} мин` : `${(s / 3600).toFixed(1)} ч`; };
+const pill = s => `<span class="pill ${s}">${s}</span>`;
+let timer = null, catalog = null;
+
+async function route() {
+  clearTimeout(timer);
+  const h = location.hash.slice(1) || "/";
+  try {
+    if (h.startsWith("/run/")) await runView(decodeURIComponent(h.slice(5)));
+    else await home();
+  } catch (e) { $("#app").innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
+}
+window.addEventListener("hashchange", route);
+setInterval(() => $("#clock").textContent = new Date().toLocaleTimeString(), 1000);
+
+async function home() {
+  catalog = catalog || await api("/api/catalog");
+  const runs = await api("/api/runs?limit=200");
+  const app = $("#app");
+  if (!$("#launch")) {
+    app.innerHTML = `<div class="card" id="launch"><h2>Запустить прогон</h2>
+      <div class="grid">
+        <div><label>МАС</label><select id="f-mas">${catalog.mas.map(m => `<option>${esc(m.id)}</option>`).join("")}</select></div>
+        <div><label>Бенчмарк</label><select id="f-bench">${catalog.benchmarks.map(b => `<option>${esc(b.id)}</option>`).join("")}</select></div>
+        <div><label>Ref МАС (ветка или коммит, пусто = заявленный)</label><input id="f-ref" placeholder=""></div>
+        <div><label>Заметка</label><input id="f-note" placeholder="зачем этот прогон"></div>
+      </div>
+      <div class="grid" id="f-params" style="margin-top:10px"></div>
+      <div style="margin-top:10px;display:flex;gap:10px;align-items:center"><button id="f-go">В очередь</button><span id="f-msg" class="muted"></span></div>
+      <div id="f-desc" class="muted" style="margin-top:8px;font-size:12px"></div></div>
+      <div class="card"><h2>Прогоны</h2><div id="runs"></div></div>`;
+    const draw = () => {
+      const m = catalog.mas.find(x => x.id === $("#f-mas").value), b = catalog.benchmarks.find(x => x.id === $("#f-bench").value);
+      const params = { ...(m.params || {}), ...(b.params || {}) }, choices = { ...(m.choices || {}), ...(b.choices || {}) };
+      $("#f-params").innerHTML = Object.entries(params).map(([k, v]) => `<div><label>${esc(k)}</label>${choices[k]
+        ? `<select data-k="${esc(k)}">${choices[k].map(c => `<option ${String(c) === String(v) ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`
+        : `<input data-k="${esc(k)}" value="${esc(v)}">`}</div>`).join("");
+      $("#f-desc").innerHTML = `<div class="graph">${(m.agents || []).map(a => `<span class="n">${esc(a)}</span>`).join(" → ")}<span class="muted">· tools: ${esc((m.tools || []).join(", "))} · ${esc(m.repo)}@${esc(m.ref.slice(0, 8))}</span></div><div style="margin-top:4px">${esc(b.description || "")}</div>`;
+    };
+    $("#f-mas").onchange = draw; $("#f-bench").onchange = draw; draw();
+    $("#f-go").onclick = async () => {
+      const overrides = {}; $("#f-params").querySelectorAll("[data-k]").forEach(el => overrides[el.dataset.k] = el.value);
+      $("#f-msg").textContent = "…";
+      try {
+        const r = await api("/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mas: $("#f-mas").value, bench: $("#f-bench").value, overrides, ref: $("#f-ref").value || null, note: $("#f-note").value }) });
+        location.hash = `#/run/${encodeURIComponent(r.id)}`;
+      } catch (e) { $("#f-msg").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+    };
+  }
+  $("#runs").innerHTML = runs.length ? `<table><tr><th>Прогон</th><th>Статус</th><th>Прогресс</th><th>Pass / fail</th><th>Параметры</th><th>Кто</th><th>Когда</th></tr>${runs.map(r => {
+    const pct = r.total ? Math.min(100, 100 * r.done / r.total) : 0;
+    return `<tr class="click" onclick="location.hash='#/run/${encodeURIComponent(r.id)}'"><td class="mono">${esc(r.id)}<div class="muted">${esc(r.note || "")}</div></td><td>${pill(r.status)}</td>
+      <td><div class="bar"><i style="width:${pct}%"></i></div><span class="muted mono">${r.done || 0}/${r.total ?? "?"}</span></td>
+      <td class="mono">${r.outcomes.pass} / ${r.outcomes.fail}</td><td class="mono">${esc(Object.entries(r.overrides).map(([k, v]) => `${k}=${v}`).join(" ") || "по умолчанию")}${r.ref ? `<div>ref ${esc(r.ref)}</div>` : ""}</td>
+      <td>${esc(r.submitted_by || "")}</td><td class="muted">${ago(r.created)}</td></tr>`;
+  }).join("")}</table>` : `<div class="muted">Прогонов ещё нет.</div>`;
+  if (runs.some(r => r.status === "running" || r.status === "queued")) timer = setTimeout(home, 5000);
+}
+
+let selected = null;
+async function runView(id) {
+  const r = await api(`/api/runs/${encodeURIComponent(id)}`);
+  const pct = r.total ? Math.min(100, 100 * r.done / r.total) : 0;
+  const conds = [...new Set(r.tasks.map(t => t.condition))].sort();
+  const taskIds = [...new Set(r.tasks.map(t => t.task_id))].sort();
+  const cell = {}; r.tasks.forEach(t => (cell[`${t.task_id}|${t.condition}`] ||= []).push(t));
+  const versions = [...new Set(conds.map(c => c.split(":")[0]))], aw = [...new Set(conds.map(c => c.split(":")[1]))];
+  const m = r.manifest;
+  $("#app").innerHTML = `<div class="card"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <h2 style="margin:0" class="mono">${esc(r.id)}</h2>${pill(r.status)}<span class="sp" style="flex:1"></span>
+      ${["queued", "running"].includes(r.status) ? `<button class="ghost" id="cancel">Отменить</button>` : ""}</div>
+    <div class="grid" style="margin-top:10px">
+      <div><label>МАС / бенчмарк</label><b>${esc(r.mas)}</b> / <b>${esc(r.bench)}</b>${r.ref ? ` <span class="mono">ref ${esc(r.ref)}</span>` : ""}</div>
+      <div><label>Параметры</label><span class="mono">${esc(Object.entries(m?.params || r.overrides).map(([k, v]) => `${k}=${v}`).join(" ") || "по умолчанию")}</span></div>
+      <div><label>Прогресс</label><div class="bar"><i style="width:${pct}%"></i></div><span class="mono">${r.done || 0}/${r.total ?? "?"}</span> <span class="muted">${dur(r.started, r.finished)}</span></div>
+      <div><label>Запустил</label>${esc(r.submitted_by || "")} <span class="muted">${ago(r.created)}</span></div>
+    </div>
+    ${r.note ? `<div style="margin-top:8px">${esc(r.note)}</div>` : ""}
+    ${r.error ? `<div class="err" style="margin-top:8px">${esc(r.error)}</div>` : ""}
+    ${m ? `<div class="muted mono" style="margin-top:8px">${esc(m.mas.repo)}@${esc(m.mas.commit.slice(0, 10))} · ${m.imported ? `импортирован из ${esc(m.source)}` : `${esc(m.image || "")} · exit ${m.exit_code} · ${m.wall_time_s} с`} · secret scan ${m.secret_scan_hits} · <a href="/api/runs/${encodeURIComponent(r.id)}/manifest" target="_blank">manifest.json</a></div>` : ""}
+  </div>
+  <div class="card"><h2>Pass по условиям</h2>${versions.length ? `<table><tr><th>API</th>${aw.map(a => `<th>${esc(a)}</th>`).join("")}</tr>${versions.map(v => `<tr><td class="mono">${esc(v)}</td>${aw.map(a => {
+    const c = r.conditions[`${v}:${a}`]; return `<td class="mono">${c ? `${c.pass}/${c.pass + c.fail}` : "–"}</td>`; }).join("")}</tr>`).join("")}</table>` : `<div class="muted">Пока нет завершённых задач.</div>`}</div>
+  <div class="cols"><div class="card"><h2>Задачи × условия</h2><div style="overflow:auto"><table class="matrix"><tr><th></th>${conds.map(c => `<th class="mono" style="writing-mode:vertical-rl;font-size:11px">${esc(c)}</th>`).join("")}</tr>
+    ${taskIds.map(t => `<tr><td class="mono">${esc(t)}</td>${conds.map(c => { const xs = cell[`${t}|${c}`] || []; if (!xs.length) return `<td></td>`;
+      const p = xs.filter(x => x.success === 1).length, f = xs.filter(x => x.success === 0).length;
+      return `<td class="c ${f ? "f" : p ? "p" : "r"}" data-trace="${esc(xs[0].trace)}" title="${esc(xs.map(x => x.reason || (x.success ? "pass" : "")).join(", "))}">${xs.length > 1 ? `${p}/${xs.length}` : f ? "✗" : p ? "✓" : "…"}</td>`; }).join("")}</tr>`).join("")}</table></div>
+    <div class="muted" style="font-size:12px;margin-top:6px">Клик по клетке открывает трассу.</div></div>
+    <div class="card"><h2>Трасса <span class="mono muted" id="tr-name"></span></h2><div id="trace" class="muted">Выбери клетку слева.</div></div></div>
+  <div class="card"><h2>Лог контейнера (хвост)</h2><pre class="log" id="log"></pre></div>`;
+  $("#app").querySelectorAll("td[data-trace]").forEach(td => td.onclick = () => showTrace(id, td.dataset.trace));
+  if ($("#cancel")) $("#cancel").onclick = async () => { await api(`/api/runs/${encodeURIComponent(id)}/cancel`, { method: "POST" }); route(); };
+  api(`/api/runs/${encodeURIComponent(id)}/log?tail=200`).then(t => { const el = $("#log"); el.textContent = t || "(пусто)"; el.scrollTop = el.scrollHeight; }).catch(() => {});
+  if (selected?.run === id) showTrace(id, selected.trace);
+  if (["queued", "running"].includes(r.status)) timer = setTimeout(route, 8000);
+}
+
+async function showTrace(id, trace) {
+  selected = { run: id, trace };
+  $("#tr-name").textContent = trace;
+  const evs = await api(`/api/runs/${encodeURIComponent(id)}/trace/${encodeURIComponent(trace)}`);
+  $("#trace").innerHTML = evs.map(e => `<div class="ev ${esc(e.agent)}"><b>${esc(e.agent)}</b> <span class="muted mono">${esc(e.kind)}${e.model ? " · " + esc(e.model) : ""}${e.tokens ? " · " + e.tokens + " tok" : ""}${e.latency_s ? " · " + Number(e.latency_s).toFixed(1) + " с" : ""}${e.cached ? " · cache" : ""}</span>
+    ${e.kind === "end" ? ` ${e.success ? '<span class="pill done">pass</span>' : `<span class="pill failed">fail${e.reason ? ": " + esc(e.reason) : ""}</span>`}` : ""}
+    ${e.text ? `<pre>${esc(e.text)}</pre>` : ""}
+    ${(e.tool_calls || []).map(c => `<details><summary>${esc(c.name)}(${esc(typeof c.arguments === "string" ? c.arguments : JSON.stringify(c.arguments))})</summary><pre>${esc(JSON.stringify(c.result, null, 1))}</pre></details>`).join("")}</div>`).join("");
+}
+route();
+</script>
+</body>
+</html>

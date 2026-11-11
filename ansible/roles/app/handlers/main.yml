@@ -1,0 +1,6 @@
+- name: Restart stand
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: restarted
+    daemon_reload: true
+  loop: [stand-api, stand-worker]

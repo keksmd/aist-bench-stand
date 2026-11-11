@@ -1,0 +1,15 @@
+[Unit]
+Description=AIST stand API and UI
+After=network-online.target
+
+[Service]
+User={{ bench_user }}
+WorkingDirectory={{ bench_root }}/app
+Environment=STAND_DB={{ bench_root }}/stand.db
+Environment=BENCH_RESULTS={{ bench_root }}/results
+ExecStart={{ bench_root }}/venv/bin/python -m stand serve --host 127.0.0.1 --port {{ stand_api_port }}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

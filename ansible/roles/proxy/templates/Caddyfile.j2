@@ -1,0 +1,13 @@
+{{ ansible_host }} {
+	tls {
+		issuer acme {
+			profile shortlived
+		}
+	}
+	basic_auth {
+		{{ stand_user }} {{ ui_hash.stdout }}
+	}
+	reverse_proxy 127.0.0.1:{{ stand_api_port }} {
+		header_up X-Stand-User {http.auth.user.id}
+	}
+}
