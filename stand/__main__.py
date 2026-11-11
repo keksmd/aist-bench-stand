@@ -61,7 +61,7 @@ def main(argv=None) -> int:
         config_repo = config_ref = None
         if args.config:
             config_repo, _, config_ref = args.config.partition("@")
-            cat = registry.load_config(config_repo, config_ref or "main")[0]
+            cat, _, config_ref = registry.load_config(config_repo, config_ref or "main")
         else:
             cat = registry.catalogue()
         if args.mas not in cat["mas"] or args.bench not in cat["benchmarks"]:

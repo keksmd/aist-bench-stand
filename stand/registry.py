@@ -163,12 +163,23 @@ def _git(args, cwd) -> str:
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
+def _secret_file_value(key: str) -> str | None:
+    path = os.environ.get("STAND_SECRETS_FILE")
+    if not path or not Path(path).is_file():
+        return None
+    for line in Path(path).read_text().splitlines():
+        if line.startswith(f"{key}="):
+            return line.split("=", 1)[1].strip() or None
+    return None
+
+
 def load_config(repo: str, ref: str, subdir: str = "stand", token: str | None = None) -> tuple[dict, Path, str]:
     """Fetch a configuration repository at ``ref`` (cached by commit) and load its catalogue.
 
     A full commit SHA already in the cache is used without network access, so the worker can run
     a pull request's configuration after the submitter's short-lived ``token`` (needed for private
-    repositories) has expired. The token is passed to git for this fetch only and never stored.
+    repositories) has expired. Without a request token the stand's own read-only
+    ``STAND_GITHUB_TOKEN`` is used, if set. The token is passed to git for this fetch only.
     Returns the catalogue, the checkout root (for ``config:`` component sources and analyzers)
     and the resolved commit.
     """
@@ -183,6 +194,7 @@ def load_config(repo: str, ref: str, subdir: str = "stand", token: str | None = 
         shutil.rmtree(tmp)
     tmp.mkdir()
     _git(["init", "-q"], tmp)
+    token = token or os.environ.get("STAND_GITHUB_TOKEN") or _secret_file_value("STAND_GITHUB_TOKEN")
     auth = []
     if token:
         basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
