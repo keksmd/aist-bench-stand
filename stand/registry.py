@@ -18,6 +18,7 @@ pull request change a component, a benchmark or an analyzer and be tested with t
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import re
@@ -162,9 +163,12 @@ def _git(args, cwd) -> str:
     return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def load_config(repo: str, ref: str, subdir: str = "stand") -> tuple[dict, Path, str]:
+def load_config(repo: str, ref: str, subdir: str = "stand", token: str | None = None) -> tuple[dict, Path, str]:
     """Fetch a configuration repository at ``ref`` (cached by commit) and load its catalogue.
 
+    A full commit SHA already in the cache is used without network access, so the worker can run
+    a pull request's configuration after the submitter's short-lived ``token`` (needed for private
+    repositories) has expired. The token is passed to git for this fetch only and never stored.
     Returns the catalogue, the checkout root (for ``config:`` component sources and analyzers)
     and the resolved commit.
     """
@@ -172,12 +176,22 @@ def load_config(repo: str, ref: str, subdir: str = "stand") -> tuple[dict, Path,
         raise SpecError(f"bad configuration source {repo}@{ref}")
     cache = Path(os.environ.get("STAND_CONFIG_CACHE", "/srv/bench/configs")) / repo.replace("/", "__")
     cache.mkdir(parents=True, exist_ok=True)
+    if SHA.match(ref) and (cache / ref / subdir).is_dir():
+        return catalogue(cache / ref / subdir), cache / ref, ref
     tmp = cache / f".fetch-{os.getpid()}"
     if tmp.exists():
         shutil.rmtree(tmp)
     tmp.mkdir()
     _git(["init", "-q"], tmp)
-    _git(["fetch", "-q", "--depth", "1", f"https://github.com/{repo}.git", ref], tmp)
+    auth = []
+    if token:
+        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        auth = ["-c", f"http.https://github.com/.extraheader=Authorization: Basic {basic}"]
+    try:
+        _git([*auth, "fetch", "-q", "--depth", "1", f"https://github.com/{repo}.git", ref], tmp)
+    except subprocess.CalledProcessError:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise SpecError(f"cannot fetch {repo}@{ref}" + ("" if token else " (private repository? pass a token)"))
     _git(["checkout", "-q", "FETCH_HEAD"], tmp)
     sha = _git(["rev-parse", "HEAD"], tmp)
     dest = cache / sha

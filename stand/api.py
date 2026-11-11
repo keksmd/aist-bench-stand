@@ -37,15 +37,16 @@ class RunRequest(BaseModel):
     components: dict[str, str] = Field(default_factory=dict)
 
 
-def _catalogue(config: str | None):
+def _catalogue(config: str | None, token: str | None = None):
+    """Catalogue for a request; a configuration repository is pinned to the commit it resolved to."""
     if not config:
         return registry.catalogue(), None, None
     repo, _, ref = config.partition("@")
     try:
-        cat, _, sha = registry.load_config(repo, ref or "main")
-    except (registry.SpecError, Exception) as e:
+        cat, _, sha = registry.load_config(repo, ref or "main", token=token)
+    except Exception as e:
         raise HTTPException(400, f"configuration {config}: {e}")
-    return cat, repo, ref or "main"
+    return cat, repo, sha
 
 
 @app.get("/", include_in_schema=False)
@@ -54,8 +55,8 @@ def index():
 
 
 @app.get("/api/catalog")
-def catalog(config: str | None = None):
-    cat = _catalogue(config)[0]
+def catalog(request: Request, config: str | None = None):
+    cat = _catalogue(config, request.headers.get("x-config-token"))[0]
     pick = lambda s, keys: {k: s.data.get(k) for k in keys} | {"sha256": s.sha256}
     return {"mas": [pick(s, ("id", "family", "description", "repo", "ref", "agents", "edges", "tools", "params", "choices", "components"))
                     for s in cat["mas"].values()],
@@ -166,7 +167,7 @@ def manifest(run_id: str):
 
 @app.post("/api/runs", status_code=201)
 def submit(req: RunRequest, request: Request):
-    cat, config_repo, config_ref = _catalogue(req.config)
+    cat, config_repo, config_ref = _catalogue(req.config, request.headers.get("x-config-token"))
     if req.mas not in cat["mas"] or req.bench not in cat["benchmarks"]:
         raise HTTPException(400, "unknown MAS or benchmark")
     try:
