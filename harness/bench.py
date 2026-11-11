@@ -152,6 +152,8 @@ def run(args) -> int:
             except subprocess.TimeoutExpired:
                 code = 124
         env_file.unlink()
+        subprocess.run(["docker", "run", "--rm", "-v", f"{work / 'src'}:/work", spec["image"],
+                        "chown", "-R", f"{os.getuid()}:{os.getgid()}", "/work"], check=True, capture_output=True)
         produced = work / "src" / spec["outputs"].format(**params)
         if produced.exists():
             shutil.copytree(produced, out_dir / "outputs") if produced.is_dir() else shutil.copy(produced, out_dir / "outputs")

@@ -1,4 +1,4 @@
-**Live:** (not deployed yet)
+**Live:** https://github.com/keksmd/aist-bench-stand/actions (self-hosted runner `aist-stand` on the stand VM)
 
 # AIST benchmark stand
 
